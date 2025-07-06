@@ -1,6 +1,6 @@
 package com.example.be.service;
 
-
+import io.kubernetes.client.Exec;
 import io.kubernetes.client.openapi.ApiClient;
 import io.kubernetes.client.openapi.Configuration;
 import io.kubernetes.client.openapi.apis.CoreV1Api;
@@ -10,22 +10,27 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import com.example.be.dto.CreateLabRequest;
+import com.example.be.dto.CommandResultResponse;
 
 import javax.annotation.PostConstruct;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
 public class KubernetesService {
 
     private CoreV1Api api;
+    private ApiClient client;
     private static final String NAMESPACE = "default";
 
     @PostConstruct
     public void init() throws Exception {
-        ApiClient client = Config.defaultClient();
+        client = Config.defaultClient();
         Configuration.setDefaultApiClient(client);
         api = new CoreV1Api();
         log.info("Kubernetes client initialized");
@@ -60,6 +65,105 @@ public class KubernetesService {
                 return "Stopped";
             default:
                 return "Unknown";
+        }
+    }
+
+    public CommandResultResponse executeCommand(String podName, String command) throws Exception {
+        log.info("Executing command '{}' in pod '{}'", command, podName);
+        
+        // Check if pod is running
+        V1Pod pod = api.readNamespacedPod(podName, NAMESPACE, null);
+        if (!"Running".equals(pod.getStatus().getPhase())) {
+            return CommandResultResponse.builder()
+                    .command(command)
+                    .output("")
+                    .error("Pod is not in running state. Current status: " + pod.getStatus().getPhase())
+                    .exitCode(-1)
+                    .success(false)
+                    .build();
+        }
+
+        try {
+            Exec exec = new Exec();
+            
+            // Split command into parts for shell execution
+            String[] commandParts = {"/bin/sh", "-c", command};
+            
+            // Create output streams to capture result
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            
+            // Execute command with proper stream handling
+            Process proc = exec.exec(
+                NAMESPACE, 
+                podName, 
+                commandParts, 
+                "lab-container",  // container name
+                false,  // stdin
+                false   // tty - set to false to avoid WebSocket issues
+            );
+
+            // Use separate threads to read streams to avoid blocking
+            Thread stdoutThread = new Thread(() -> {
+                try {
+                    if (proc.getInputStream() != null) {
+                        proc.getInputStream().transferTo(stdout);
+                    }
+                } catch (IOException e) {
+                    log.warn("Error reading stdout: {}", e.getMessage());
+                }
+            });
+
+            Thread stderrThread = new Thread(() -> {
+                try {
+                    if (proc.getErrorStream() != null) {
+                        proc.getErrorStream().transferTo(stderr);
+                    }
+                } catch (IOException e) {
+                    log.warn("Error reading stderr: {}", e.getMessage());
+                }
+            });
+
+            stdoutThread.start();
+            stderrThread.start();
+            
+            // Wait for completion with timeout
+            boolean finished = proc.waitFor(30, TimeUnit.SECONDS);
+            
+            // Wait for stream reading to complete
+            stdoutThread.join(5000);
+            stderrThread.join(5000);
+            
+            int exitCode = finished ? proc.exitValue() : -1;
+            String output = stdout.toString("UTF-8");
+            String error = stderr.toString("UTF-8");
+            
+            if (!finished) {
+                proc.destroyForcibly();
+                error = "Command timed out after 30 seconds";
+                exitCode = -1;
+            }
+            
+            log.info("Command executed. Exit code: {}, Output length: {}, Error length: {}", 
+                    exitCode, output.length(), error.length());
+            
+            return CommandResultResponse.builder()
+                    .command(command)
+                    .output(output)
+                    .error(error)
+                    .exitCode(exitCode)
+                    .success(exitCode == 0)
+                    .build();
+                    
+        } catch (Exception e) {
+            log.error("Failed to execute command in pod {}: {}", podName, e.getMessage(), e);
+            return CommandResultResponse.builder()
+                    .command(command)
+                    .output("")
+                    .error("Failed to execute command: " + e.getMessage())
+                    .exitCode(-1)
+                    .success(false)
+                    .build();
         }
     }
 

@@ -9,7 +9,7 @@ public class CreateLabRequest {
     private String userId;
     
     
-    private String labType;
+    private String labType;   //maybe we have docker, python, git ,etc, ..
     
     
     

@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import com.example.be.dto.CreateLabRequest;
+import com.example.be.dto.ExecuteCommandRequest;
+import com.example.be.dto.CommandResultResponse;
 import com.example.be.dto.LabResponse;
 import com.example.be.model.Lab;
 
@@ -13,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+
 @Slf4j
 @Service
 public class LabService {
@@ -85,6 +88,47 @@ public class LabService {
         labStore.put(labId, lab);
         
         return podStatus;
+    }
+
+    public CommandResultResponse executeCommand(ExecuteCommandRequest request) throws Exception {
+        Lab lab = labStore.get(request.getLabId());
+        if (lab == null) {
+            throw new IllegalArgumentException("Lab not found: " + request.getLabId());
+        }
+
+        log.info("Executing command '{}' in lab {}", request.getCommand(), request.getLabId());
+        
+        // Validate command safety (basic security check)
+        if (!isCommandSafe(request.getCommand())) {
+            return CommandResultResponse.builder()
+                    .command(request.getCommand())
+                    .output("")
+                    .error("Command not allowed for security reasons")
+                    .exitCode(-1)
+                    .success(false)
+                    .build();
+        }
+
+        return kubernetesService.executeCommand(lab.getPodName(), request.getCommand());
+    }
+
+    private boolean isCommandSafe(String command) {
+        // Basic security check - block potentially dangerous commands
+        String[] blockedCommands = {
+            "rm -rf", "sudo", "su", "passwd", "shutdown", "reboot", 
+            "kill", "killall", "pkill", "halt", "poweroff",
+            "dd", "mkfs", "fdisk", "mount", "umount"
+        };
+        
+        String lowercaseCommand = command.toLowerCase();
+        for (String blocked : blockedCommands) {
+            if (lowercaseCommand.contains(blocked)) {
+                log.warn("Blocked potentially dangerous command: {}", command);
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     private String generateLabId(String userId) {

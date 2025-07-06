@@ -1,13 +1,13 @@
 package com.example.be.controller;
 
-
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.example.be.dto.CreateLabRequest;
+import com.example.be.dto.ExecuteCommandRequest;
+import com.example.be.dto.CommandResultResponse;
 import com.example.be.dto.LabResponse;
 import com.example.be.service.LabService;
 
@@ -66,6 +66,48 @@ public class LabController {
         } catch (Exception e) {
             log.error("Failed to get lab status for {}: {}", labId, e.getMessage());
             return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PostMapping("/execute")
+    public ResponseEntity<CommandResultResponse> executeCommand(@RequestBody ExecuteCommandRequest request) {
+        try {
+            log.info("Executing command '{}' in lab {}", request.getCommand(), request.getLabId());
+            CommandResultResponse result = labService.executeCommand(request);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Failed to execute command in lab {}: {}", request.getLabId(), e.getMessage(), e);
+            return ResponseEntity.badRequest().body(
+                CommandResultResponse.builder()
+                    .command(request.getCommand())
+                    .output("")
+                    .error("Failed to execute command: " + e.getMessage())
+                    .exitCode(-1)
+                    .success(false)
+                    .build()
+            );
+        }
+    }
+
+    @GetMapping("/{labId}/suggested-commands")
+    public ResponseEntity<List<String>> getSuggestedCommands(@PathVariable String labId) {
+        // Get suggested commands based on lab type
+        try {
+            // You might want to get lab type from lab service
+            List<String> commands = List.of(
+                "ls -la",
+                "pwd",
+                "whoami",
+                "ps aux",
+                "df -h",
+                "free -h",
+                "uname -a",
+                "cat /etc/os-release"
+            );
+            return ResponseEntity.ok(commands);
+        } catch (Exception e) {
+            log.error("Failed to get suggested commands for lab {}: {}", labId, e.getMessage());
+            return ResponseEntity.badRequest().build();
         }
     }
 }
