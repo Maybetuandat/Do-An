@@ -1,5 +1,4 @@
-
-
+package com.example.be.repository;
 import com.example.be.model.LabTemplate;
 import com.example.be.model.SetupStep;
 import com.example.be.model.Lab;

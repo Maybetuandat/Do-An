@@ -53,10 +53,7 @@ public class LabController {
         }
     }
 
-    @GetMapping("/types")
-    public ResponseEntity<List<String>> getLabTypes() {
-        return ResponseEntity.ok(List.of("docker", "python", "nodejs", "kubernetes"));
-    }
+   
 
     @GetMapping("/{labId}/status")
     public ResponseEntity<String> getLabStatus(@PathVariable String labId) {
@@ -110,4 +107,8 @@ public class LabController {
             return ResponseEntity.badRequest().build();
         }
     }
+    @GetMapping("/types")
+public ResponseEntity<List<String>> getLabTypes() {
+    return ResponseEntity.ok(List.of("docker", "python", "nodejs", "kubernetes", "johndoe"));
+}
 }
